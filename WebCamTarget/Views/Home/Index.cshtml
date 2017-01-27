@@ -1,0 +1,15 @@
+﻿@{
+    ViewBag.Title = "WebCamTarget";
+}
+<h1 id="digit"></h1>
+<canvas id="captured" width="640" height="480" class="webcamtarget-canvas"></canvas>
+<canvas id="selection" width="640" height="480" class="webcamtarget-canvas"></canvas>
+
+<div id="my_camera" hidden></div>
+
+@Scripts.Render("~/Scripts/webcam")
+@Scripts.Render("~/Scripts/rxjs")
+
+@Scripts.Render("~/Scripts/app")
+
+

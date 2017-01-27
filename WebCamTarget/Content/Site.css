@@ -1,0 +1,18 @@
+﻿#my_camera{
+   width:0;
+   height:0;
+}
+
+.webcamtarget-canvas{
+    position:absolute;
+    left:10px;
+    top:10px;
+}
+
+#captured{
+    z-index:0;
+}
+
+#selection{
+    z-index:1;
+}
