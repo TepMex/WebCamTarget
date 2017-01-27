@@ -2,3 +2,5 @@
 bin
 obj
 packages
+/WebCamTarget/Scripts/app/app.js.map
+/WebCamTarget/Scripts/app/app.js
