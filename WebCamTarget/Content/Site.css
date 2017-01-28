@@ -16,3 +16,23 @@
 #selection{
     z-index:1;
 }
+
+#digit{
+    position:absolute;
+    z-index:-1;
+    left:700px;
+    top:10px;
+}
+
+#startButton{
+    z-index:2;
+    position:absolute;
+    left:700px;
+    top:100px;
+}
+
+#textOutput{
+    position:absolute;
+    left:700px;
+    top:150px;
+}

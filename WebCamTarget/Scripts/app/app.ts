@@ -1,6 +1,5 @@
 declare var Webcam: any;
 
-
 class ScreenPoint {
     public x: number;
     public y: number;
@@ -13,12 +12,30 @@ class ScreenPoint {
 class WebCamTargetApp {
 
     private FRAME_RATE: number = 200;
+    private SELECTION_SIDE: number = 32;
+    private TRESHOLD_COEFFICIENT: number = 5;
 
     private canvas: HTMLCanvasElement;
     private selectionCanvas: HTMLCanvasElement;
 
+    private startButton: HTMLButtonElement;
+    private outputText: HTMLParagraphElement;
+    private digit: HTMLHeadingElement;
+    private camera: HTMLDivElement;
+
     private newFrame: ImageData;
     private oldFrame: ImageData;
+
+    private noise: number = 0;
+
+    private selectionColor: number = 0;
+
+    private reverseCounter: number = 50;
+
+    private motionCaptured: boolean = false;
+    private motionCount: number = 0;
+
+    private selectionRect: ScreenPoint;
 
     constructor() {
 
@@ -26,20 +43,39 @@ class WebCamTargetApp {
             .subscribe(() => {
 
                 this.selectionCanvas = document.querySelector("#selection") as HTMLCanvasElement;
+                this.startButton = document.querySelector("#startButton") as HTMLButtonElement;
+                this.outputText = document.querySelector("#textOutput") as HTMLParagraphElement;
+                this.digit = document.querySelector("#digit") as HTMLHeadingElement;
+                this.camera = document.querySelector("#my_camera") as HTMLDivElement;
 
                 this.initApp()
                     .subscribe(() => {
 
-                        Rx.Observable.fromEvent(this.selectionCanvas, "click")
-                            .subscribe((e) => {
-                                this.newSelection(e);
-                            });
-
-                        Rx.Observable
-                            .interval(this.FRAME_RATE)
+                        Rx.Observable.fromEvent(this.startButton, "click")
+                            .take(1)
                             .subscribe(() => {
-                                this.onSnapshot();
+                                Rx.Observable
+                                    .interval(this.FRAME_RATE)
+                                    .takeWhile(()=>!!this.reverseCounter)
+                                    .subscribe(() => {
+                                        this.reverseCounter--;
+                                        this.digit.textContent = Math.round((this.reverseCounter/5)).toString();
+                                        this.onSnapshot();
+                                    }, null, () => {
+                                        Rx.Observable.fromEvent(this.selectionCanvas, "click")
+                                            .take(1)
+                                            .subscribe((e: any) => {
+                                                this.selectionRect = this.newSelection(e);
+                                            }, null, () => {
+                                                Rx.Observable
+                                                    .interval(this.FRAME_RATE)
+                                                    .take(50)
+                                                    .subscribe(() => this.collectNoise(),
+                                                    null, () => this.onNoiseCollected());
+                                            });
+                                    });
                             });
+                        
                     });
             })
 
@@ -63,38 +99,113 @@ class WebCamTargetApp {
 
     }
 
-    private onSnapshot(): void {
+    private onSnapshot(): void
+    {
 
         Rx.Observable.create((o) => {
-            Webcam.snap((d: any, c: any, ctx: any) => o.onNext(c), this.canvas);
-        }).subscribe(() => {
+            Webcam.snap((d: any, c: any, ctx: any) => o.onNext(ctx), this.canvas);
+        }).take(1)
+            .subscribe(() => {
+            console.log("onSnapshot");
+        });
+    }
 
-            var ctx: CanvasRenderingContext2D = this.canvas.getContext("2d");
+    private collectNoise(): void
+    {
+        this.outputText.textContent = "Определение шума";
+        Rx.Observable.create((o) => {
+            Webcam.snap((d: any, c: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => o.onNext(ctx));
+        }).take(1)
+            .subscribe((ctx: CanvasRenderingContext2D) => {
             this.oldFrame = this.newFrame;
-            this.newFrame = ctx.getImageData(608, 0, 640, 32);
+            this.newFrame = ctx.getImageData(this.selectionRect.x,
+                this.selectionRect.y,
+                this.SELECTION_SIDE,
+                this.SELECTION_SIDE);
 
             if (this.oldFrame)
-                document.querySelector("#digit")
-                    .textContent = this.costFunction(this.oldFrame.data, this.newFrame.data).toString();
+            {
+                var newCost = this.costFunction(this.oldFrame.data, this.newFrame.data);
+                this.noise = newCost > this.noise ? newCost : this.noise;
+                this.digit.textContent = this.noise.toString();
+            }
+        });
+    }
+
+    private onNoiseCollected(): void
+    {
+        this.outputText.textContent = "Определение шума завершено";
+
+        this.drawSelectionRect(this.selectionCanvas.getContext("2d"),
+            this.selectionRect.x, this.selectionRect.y, "#00ff00");
+
+        Rx.Observable.fromEvent(this.startButton, "click")
+            .take(1)
+            .subscribe(() => {
+
+                this.canvas.hidden = true;
+                this.selectionCanvas.hidden = true;
+
+                Rx.Observable.interval(this.FRAME_RATE)
+                    .subscribe(() => this.motionDetection());
+                
+            });
+
+    }
+
+    private motionDetection(): void
+    {
+        Rx.Observable.create((o) => {
+            Webcam.snap((d: any, c: any, ctx: any) => o.onNext(ctx), this.canvas);
+        })
+            .take(1)
+            .subscribe((ctx: CanvasRenderingContext2D) => {
+            this.oldFrame = this.newFrame;
+            this.newFrame = ctx.getImageData(this.selectionRect.x,
+                this.selectionRect.y,
+                this.SELECTION_SIDE,
+                this.SELECTION_SIDE);
+
+            if (this.oldFrame) {
+                var newCost: number = this.costFunction(this.oldFrame.data, this.newFrame.data);
+                var isMotion: boolean = newCost > this.noise * this.TRESHOLD_COEFFICIENT;
+
+                this.motionCount += (!this.motionCaptured && isMotion) ? 1 : 0;
+
+                this.motionCaptured = isMotion;
+
+                this.digit.textContent = this.motionCount.toString();
+                this.outputText.textContent = isMotion ? "Есть движение" : "Нет движения";
+            }
 
         });
     }
 
-    private newSelection(e: MouseEvent): void
+    private newSelection(e: MouseEvent): ScreenPoint
     {
 
         var pos: ScreenPoint = this.getMousePos(this.selectionCanvas, e);
 
         var ctx: CanvasRenderingContext2D = this.selectionCanvas.getContext("2d");
 
+        var newX: number = pos.x - this.SELECTION_SIDE / 2;
+        var newY: number = pos.y - this.SELECTION_SIDE / 2;
+
+        this.drawSelectionRect(ctx, newX, newY);
+        return new ScreenPoint(newX, newY);
+
+
+    }
+
+    private drawSelectionRect(ctx: CanvasRenderingContext2D, x: number, y: number, color?: string): void
+    {
         ctx.beginPath();
         ctx.lineWidth = 6;
-        ctx.strokeStyle = "green";
-        ctx.rect(pos.x - 16, pos.y-16, 32, 32);
+        ctx.strokeStyle = color ? color : "#ff0000";
+        ctx.rect(x,y,
+            this.SELECTION_SIDE,
+            this.SELECTION_SIDE);
         ctx.stroke();
-        console.log((pos.x - 16).toString() + " : " + (pos.y - 16).toString());
-
-
     }
 
     private costFunction(oldImage: Uint8ClampedArray, newImage: Uint8ClampedArray): number
